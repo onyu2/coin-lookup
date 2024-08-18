@@ -1,5 +1,5 @@
 # coin-lookup
-a simple script that fetches the current price of my big 3 cryptocurrencies in USD. you can use it to check the price of a specific amount of a cryptocurrency or just see the current prices
+a simple script that fetches the current price of (my) big 3 cryptocurrencies in USD. you can use it to check the price of a specific amount of a cryptocurrency or just see the current prices
 
 ## usage
 
