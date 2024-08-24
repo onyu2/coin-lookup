@@ -1,56 +1,91 @@
 #!/bin/sh
 
-# Check if no arguments are provided, then display the current prices of BTC, LTC, and ETH
-if [ "$#" -eq 0 ]; then
-    response=$(curl -s "https://min-api.cryptocompare.com/data/pricemultifull?fsyms=BTC,LTC,ETH&tsyms=USD&e=CCCAGG")
+# function to display currency stats
+display_stats() {
+    local currency=$1
+    echo "$currency:"
+    jq -r ".DISPLAY.$currency.USD | \"\\(.PRICE)   PRICE\\n\\(.CHANGEPCTDAY)%           DAILY CHANGE\\n\\(.HIGHDAY)        24H HIGH\\n\\(.LOWDAY)         24H LOW\\n\\(.MKTCAP)         MARKET CAP\"" <<< "$response"
+    echo ""
+}
 
-    echo "The current stats of BTC (in USD):"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.BTC.USD.PRICE')        Price"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.BTC.USD.CHANGEPCTDAY')%           Daily change"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.BTC.USD.HIGHDAY')        24h High"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.BTC.USD.LOWDAY')         24h Low"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.BTC.USD.MKTCAP')         Market Cap"
-    echo ""
-    echo "The current stats of LTC (in USD):"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.LTC.USD.PRICE')        Price"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.LTC.USD.CHANGEPCTDAY')%           Daily change"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.LTC.USD.HIGHDAY')        24h High"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.LTC.USD.LOWDAY')         24h Low"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.LTC.USD.MKTCAP')         Market Cap"
-    echo ""
-    echo "The current stats of ETH (in USD):"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.ETH.USD.PRICE')        Price"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.ETH.USD.CHANGEPCTDAY')%           Daily change"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.ETH.USD.HIGHDAY')        24h High"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.ETH.USD.LOWDAY')         24h Low"
-    echo "$(echo "$response" | jq --raw-output '.DISPLAY.ETH.USD.MKTCAP')         Market Cap"
+# function to display minimal stats
+display_mini_stats() {
+    local currency=$1
+    price=$(jq -r ".DISPLAY.$currency.USD.PRICE" <<< "$response" | tr -d '$ ')
+    printf "%s: $%s\n" "$currency" "$price"
+}
+
+# function to format timestamp
+format_timestamp() {
+    local timestamp=$1
+    if [[ $timestamp =~ ^[0-9]+$ ]]; then
+        if date -r "$timestamp" &>/dev/null; then
+            # BSD-style date command (macOS)
+            date -r "$timestamp" "+%m/%d/%y %I:%M:%S %p"
+        else
+            # GNU-style date command (Linux)
+            date -d "@$timestamp" "+%m/%d/%y %I:%M:%S %p"
+        fi
+    else
+        echo "$timestamp"
+    fi
+}
+
+# check if no arguments are provided, then display the current prices of btc, eth, and ltc
+if [ "$#" -eq 0 ]; then
+    response=$(curl -s "https://min-api.cryptocompare.com/data/pricemultifull?fsyms=BTC,ETH,LTC&tsyms=USD&e=CCCAGG")
+    timestamp=$(jq -r ".DISPLAY.BTC.USD.LASTUPDATE" <<< "$response")
+    echo "CURRENT PRICE OF CRYPTO IN USD (UPDATED: $timestamp):"
+    display_mini_stats "BTC"
+    display_mini_stats "ETH"
+    display_mini_stats "LTC"
     exit 0
 fi
 
-# If exactly 2 arguments are provided, do the conversion
+# check for 'full' argument
+if [ "$#" -eq 1 ] && [ "$1" = "full" ]; then
+    response=$(curl -s "https://min-api.cryptocompare.com/data/pricemultifull?fsyms=BTC,ETH,LTC&tsyms=USD&e=CCCAGG")
+    timestamp=$(jq -r ".DISPLAY.BTC.USD.LASTUPDATE" <<< "$response")
+    echo "CURRENT PRICE OF CRYPTO IN USD (UPDATED: $timestamp):"
+    echo ""
+    display_stats "BTC"
+    display_stats "ETH"
+    display_stats "LTC"
+    exit 0
+fi
+
+# if exactly 2 arguments are provided, do the conversion
 if [ "$#" -eq 2 ]; then
-    currency=$(echo "$1" | tr '[:lower:]' '[:upper:]')  # Convert input to uppercase
+    currency=$(echo "$1" | tr '[:lower:]' '[:upper:]')  # convert input to uppercase
     amount=$2
 
-    # Fetch data for the specified currency
-    response=$(curl -s "https://min-api.cryptocompare.com/data/pricemultifull?fsyms=$currency&tsyms=USD&e=CCCAGG")
-
-    # Check if the currency symbol is valid
-    if [ "$(echo "$response" | jq -r ".DISPLAY.$currency.USD")" = "null" ]; then
-        echo "Invalid currency symbol: $currency"
+    # validate amount is a number
+    if ! echo "$amount" | grep -E '^([0-9]*\.)?[0-9]+$' >/dev/null; then
+        echo "ERROR: INVALID AMOUNT. PLEASE ENTER A VALID NUMBER."
         exit 1
     fi
 
-    # Extract the price in USD
-    price=$(echo "$response" | jq -r ".DISPLAY.$currency.USD.PRICE" | sed 's/[^0-9.]//g')
+    # fetch data for the specified currency
+    response=$(curl -s "https://min-api.cryptocompare.com/data/pricemultifull?fsyms=$currency&tsyms=USD&e=CCCAGG")
 
-    # Calculate the USD value
+    # check if the currency symbol is valid
+    if [ "$(jq -r ".DISPLAY.$currency.USD" <<< "$response")" = "null" ]; then
+        echo "INVALID CURRENCY SYMBOL: $currency"
+        exit 1
+    fi
+
+    # extract the price and timestamp
+    price=$(jq -r ".RAW.$currency.USD.PRICE" <<< "$response")
+    timestamp=$(jq -r ".RAW.$currency.USD.LASTUPDATE" <<< "$response")
+    formatted_time=$(format_timestamp "$timestamp")
     usd_value=$(echo "$amount * $price" | bc)
+    formatted_usd=$(printf "%.2f" $usd_value)
 
-    echo "$amount $currency is approximately $usd_value USD"
+    echo "$amount $currency ≈ $formatted_usd USD"
+    echo "(UPDATED $formatted_time)"
     exit 0
 fi
 
-# If the script reaches here, it means the input was incorrect
-echo "Usage: coin <currency_symbol> <amount>"
+# if the script reaches here, it means the input was incorrect
+echo "USAGE: coin [full] or coin <currency_symbol> <amount>"
 exit 1
